@@ -3,119 +3,142 @@ import pandas as pd
 import time
 
 # ==========================================
-# 1. Excelデータを読み込む関数
+# 1. データ読み込み
 # ==========================================
 @st.cache_data
 def load_data():
-    # Excelファイル名を指定（同じフォルダに置いてね！）
     df = pd.read_excel("valorant_questions.xlsx")
     return df
 
-# ==========================================
-# 2. 画面のデザイン設定
-# ==========================================
-st.set_page_config(page_title="VALORANT診断", page_icon="🔫")
-st.title("🔫 VALORANT エージェント適性診断")
-st.write("100問の質問から、あなたの適性ロールと性格を分析します！")
-st.write("---")
+st.set_page_config(page_title="VALORANT 性格 × 適性診断 100", page_icon="🔫")
+st.title("🔫 VALORANT 性格 × 適性診断 100")
+st.write("あなたのプレイスタイルと性格をMBTI風に精密分析します。")
 
-# データ読み込み実行
 try:
     df = load_data()
 except Exception as e:
-    st.error(f"Excelファイルが見つかりません！同じ場所に 'valorant_questions.xlsx' があるか確認してね。\nエラー内容: {e}")
+    st.error("Excelファイルが読み込めません。GitHubにファイルがあるか確認してください。")
     st.stop()
 
 # ==========================================
-# 3. 診断フォームの生成
+# 2. 診断フォーム
 # ==========================================
-user_scores = {} # ここに点数を貯めていく
+user_scores = {}
 
-with st.form(key='my_form'):
-    # Excelの行（質問）を1つずつ取り出して表示
+with st.form(key='diagnosis_form'):
     for index, row in df.iterrows():
         st.subheader(f"Q{index + 1}. {row['question']}")
         
-        # 選択肢リストを作る（空欄のセルは除外する）
         options_dict = {}
-        
-        # A~Dの選択肢を確認
         for char in ['A', 'B', 'C', 'D']:
-            opt_text = row.get(f'option_{char}') # 文言
-            opt_score = row.get(f'score_{char}') # スコア文字列
-            
-            # 文言が入っている場合のみ選択肢に追加
+            opt_text = row.get(f'option_{char}')
+            opt_score = row.get(f'score_{char}')
             if pd.notna(opt_text) and str(opt_text).strip() != "":
-                # 表示用に "選択肢の文言" をキー、"スコアデータ" を値にする
                 options_dict[opt_text] = opt_score
         
-        # ラジオボタン表示
-        choice = st.radio(
-            "直感で選んでください:",
-            list(options_dict.keys()),
-            key=f"q_{index}",
-            index=None # 初期選択なし
-        )
-
-        # 選んだ選択肢のスコアデータを保存しておく
+        choice = st.radio("選択してください:", list(options_dict.keys()), key=f"q_{index}", index=None)
         if choice:
             user_scores[index] = options_dict[choice]
 
-    st.write("")
-    submit_btn = st.form_submit_button("診断結果を見る！")
+    st.write("---")
+    submit_btn = st.form_submit_button("診断結果を解析する")
 
 # ==========================================
-# 4. 結果判定ロジック
+# 3. 性格分析ロジック
 # ==========================================
 if submit_btn:
-    # 未回答チェック
     if len(user_scores) < len(df):
-        st.warning("まだ回答していない質問があります！")
+        st.warning(f"まだ回答していない質問があります！（現在 {len(user_scores)} / {len(df)} 問）")
     else:
-        # 集計開始！
-        final_tally = {"Duelist": 0, "Initiator": 0, "Controller": 0, "Sentinel": 0}
+        # スコア集計
+        tally = {
+            # ロール
+            "Duelist": 0, "Initiator": 0, "Controller": 0, "Sentinel": 0,
+            # 性格軸（プラスとマイナスで判定）
+            "Aggro": 0,    # 積極性 (Aggressive vs Passive)
+            "Logic": 0,    # 思考法 (Logical vs Intuitive)
+            "Stoic": 0,    # 精神性 (Stoic vs Emotional)
+            "Teamwork": 0  # 連帯感 (Team-Player vs Solo-Carry)
+        }
         
-        # プログレスバー演出
+        for score_str in user_scores.values():
+            if pd.isna(score_str): continue
+            items = str(score_str).split(",")
+            for item in items:
+                try:
+                    key, val = item.split(":")
+                    key = key.strip()
+                    val = int(val)
+                    if key in tally:
+                        tally[key] += val
+                except: pass
+
+        # 演出
+        st.write("性格成分を抽出中...")
         bar = st.progress(0)
         for i in range(100):
             time.sleep(0.01)
             bar.progress(i + 1)
-        
-        # スコア計算
-        for score_str in user_scores.values():
-            # "Duelist:3, IQ:1" みたいな文字列を分解する
-            if pd.isna(score_str): continue # データがない場合はスキップ
-            
-            items = str(score_str).split(",") # カンマで切る
-            for item in items:
-                try:
-                    role, point = item.split(":") # コロンで切る
-                    role = role.strip()
-                    point = int(point)
-                    
-                    # 該当するロールに加点
-                    if role in final_tally:
-                        final_tally[role] += point
-                    else:
-                        # 定義していないパラメータ（IQとか）も一応数えておく
-                        if role not in final_tally:
-                            final_tally[role] = 0
-                        final_tally[role] += point
-                except:
-                    pass # 書き方が間違ってたら無視
+        st.balloons()
 
-        # 一番高いスコアを探す
-        best_role = max(final_tally, key=final_tally.get)
-        
+        # --- MBTI風 4文字コード作成 ---
+        mbti_code = ""
+        mbti_desc = []
+
+        # 1. 積極性
+        if tally["Aggro"] >= 5:
+            mbti_code += "A"
+            mbti_desc.append("【A】Aggressive（超攻撃的）")
+        else:
+            mbti_code += "P"
+            mbti_desc.append("【P】Passive（慎重派）")
+
+        # 2. 思考法
+        if tally["Logic"] >= 5:
+            mbti_code += "L"
+            mbti_desc.append("【L】Logical（理論派）")
+        else:
+            mbti_code += "I"
+            mbti_desc.append("【I】Intuitive（直感派）")
+
+        # 3. 精神性
+        if tally["Stoic"] >= 5:
+            mbti_code += "S"
+            mbti_desc.append("【S】Stoic（冷静沈着）")
+        else:
+            mbti_code += "E"
+            mbti_desc.append("【E】Emotional (情熱的)")
+
+        # 4. 連帯感
+        if tally["Teamwork"] >= 5:
+            mbti_code += "T"
+            mbti_desc.append("【T】Team-Player（協力重視）")
+        else:
+            mbti_code += "C"
+            mbti_desc.append("【C】Solo-Carry（圧倒的主人公）")
+
+        # ロール決定
+        roles = {k: v for k, v in tally.items() if k in ["Duelist", "Initiator", "Controller", "Sentinel"]}
+        best_role = max(roles, key=roles.get)
+
         # 結果表示
-        st.success("分析完了！")
-        st.balloons() # 風船を飛ばす演出
+        st.header(f"あなたのタイプは... **{mbti_code} 型**")
+        st.subheader(f"適性ロール: **{best_role}**")
+        st.write("---")
         
-        st.header(f"あなたに向いているのは... 【{best_role}】 です！")
+        st.write("### 📊 性格分析レポート")
+        for desc in mbti_desc:
+            st.write(desc)
         
-        # グラフ表示
-        st.bar_chart(final_tally)
-        
-        # 詳細データの表示（デバッグ用）
-        with st.expander("詳細スコアを見る"):
-            st.write(final_tally)
+        # 二つ名の生成（例）
+        titles = {
+            "ALST": "冷静な戦術指揮官",
+            "AIST": "本能で動くエース",
+            "PLST": "完璧主義の守護神",
+            "PIET": "心優しいサポーター"
+        }
+        title = titles.get(mbti_code, "個性豊かなエージェント")
+        st.info(f"あなたは... **「{title}」** です！")
+
+        with st.expander("詳細スコアを確認する"):
+            st.write(tally)
